@@ -1,0 +1,44 @@
+# Copy to config.yaml and fill in. config.yaml is git-ignored (it holds your personal info).
+
+profile:
+  first_name: Jane
+  last_name: Doe
+  email: jane.doe@example.com
+  phone: "555-555-1234"
+  address1: 123 Main St
+  address2: ""
+  city: Springfield
+  state: IL            # two-letter code
+  state_name: Illinois
+  zip: "62701"
+  country: United States
+  country_code: US
+  birthdate: "1990-04-15"   # YYYY-MM-DD; used for DOB fields and age checks
+
+# Giveaways to enter. frequency: once | daily | weekly
+sweepstakes:
+  - name: Example daily sweepstakes
+    url: https://example.com/sweeps
+    frequency: daily
+    end_date: "2026-12-31"     # optional; skipped after this date
+    # Optional overrides when the auto-detection gets a site wrong:
+    # fields:
+    #   "#promo-code": "WINTER"
+    # submit_selector: "button.enter-btn"
+    # success_text: ["You're entered"]
+
+# Optional RSS/Atom feeds that list giveaways. New links are recorded, and entered
+# automatically only if settings.auto_enter_discovered is true.
+feeds: []
+#  - https://some-sweepstakes-site.example/feed/
+
+settings:
+  headless: true
+  data_dir: data
+  delay_between_entries_s: 20
+  accept_rules: true            # tick "I agree to the Official Rules" boxes
+  accept_marketing: false       # tick newsletter / partner-offer boxes
+  auto_enter_discovered: false
+  max_discovered_per_run: 10
+  loop_interval_hours: 24
+  screenshots: true             # saved to data/screenshots after each submit

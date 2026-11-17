@@ -1,0 +1,15 @@
+<!doctype html><html><body>
+<h1>Win a Grill!</h1><p>Open to legal residents of the US, 18 years of age or older.</p>
+<form id="f" onsubmit="event.preventDefault(); document.body.innerHTML='<h2>Thanks for entering! Good luck.</h2>';">
+  <label for="fn">First Name</label><input id="fn" name="fname" required>
+  <label for="ln">Last Name</label><input id="ln" name="lname" required>
+  <input type="email" name="contact" placeholder="Email address" required>
+  <label>State <select name="st" required><option value="">--</option><option value="IL">Illinois</option><option value="CA">California</option></select></label>
+  <label>Birth month <select name="dob_month" required><option value="">--</option><option>January</option><option>April</option></select></label>
+  <input name="postalCode" placeholder="ZIP" required>
+  <label><input type="checkbox" name="agree" required> I agree to the Official Rules</label>
+  <label><input type="checkbox" name="news"> Send me newsletters and partner offers</label>
+  <button type="submit">Enter Now</button>
+</form>
+<form id="search"><input name="q" placeholder="Search site"><button>Go</button></form>
+</body></html>
