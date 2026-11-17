@@ -6,6 +6,7 @@ import os
 import re
 import time
 from datetime import date, datetime
+from urllib.parse import urlparse
 
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PWTimeout
@@ -14,6 +15,7 @@ from . import rules
 from .config import Config, Sweepstake
 from .discovery import fetch_feed
 from .filler import detect_captcha, fill_form, submit
+from .notify import notify_run
 from .tracker import Tracker
 
 log = logging.getLogger("giveaway_bot")
@@ -55,8 +57,55 @@ def _rules_text(ctx: BrowserContext, page: Page, timeout: int) -> str:
     return ""
 
 
+SOCIAL = re.compile(
+    r"(facebook|twitter|x|instagram|pinterest|tiktok|youtube|linkedin|reddit|whatsapp|"
+    r"t|bit|feedburner|gravatar|wordpress|google|amzn|amazon)\.(com|co|ly|me)$", re.I,
+)
+ENTER_TEXT = re.compile(r"\b(enter|entry|click here|visit|go to|giveaway|sweepstakes|contest)\b", re.I)
+
+
+def _host(url: str) -> str:
+    h = (urlparse(url).hostname or "").lower()
+    return h[4:] if h.startswith("www.") else h
+
+
+def find_entry_link(page: Page) -> str | None:
+    """On a blog post about a giveaway, find the outbound link to the real entry page."""
+    here = _host(page.url)
+    best, best_score = None, 0
+    links = page.locator("a[href]")
+    for i in range(min(links.count(), 400)):
+        a = links.nth(i)
+        try:
+            href = a.evaluate("a => a.href")
+            text = a.inner_text(timeout=300).strip()
+        except Exception:
+            continue
+        host = _host(href)
+        if not href.startswith("http") or not host or host == here or SOCIAL.search(host):
+            continue
+        score = 0
+        if re.search(r"\benter\b|enter (here|now)|click here to enter", text, re.I):
+            score = 3
+        elif ENTER_TEXT.search(text):
+            score = 2
+        elif RULES_LINK.search(text):
+            score = 0
+        if score > best_score:
+            best, best_score = href, score
+    return best
+
+
 def enter_one(ctx: BrowserContext, cfg: Config, sweep: Sweepstake) -> tuple[str, str]:
     """Returns (status, detail)."""
+    info: dict[str, str] = {}
+    status, detail = _enter_one(ctx, cfg, sweep, info)
+    if info.get("via"):
+        detail += f" (via {info['via']})"
+    return status, detail
+
+
+def _enter_one(ctx: BrowserContext, cfg: Config, sweep: Sweepstake, info: dict) -> tuple[str, str]:
     s = cfg.settings
     if sweep.end_date and date.fromisoformat(sweep.end_date) < date.today():
         return "skipped", f"ended {sweep.end_date}"
@@ -70,6 +119,16 @@ def enter_one(ctx: BrowserContext, cfg: Config, sweep: Sweepstake) -> tuple[str,
         except PWTimeout:
             pass
 
+        if sweep.follow_link:
+            target = find_entry_link(page)
+            if target:
+                info["via"] = target
+                page.goto(target, wait_until="domcontentloaded")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=10000)
+                except PWTimeout:
+                    pass
+
         text = _page_text(page)
         if rules.has_ended(text):
             return "skipped", "page says giveaway has ended"
@@ -80,6 +139,9 @@ def enter_one(ctx: BrowserContext, cfg: Config, sweep: Sweepstake) -> tuple[str,
         banned = rules.automation_banned(full)
         if banned:
             return "needs_manual", f"rules prohibit automated entry: \"{banned}\""
+        not_eligible = rules.residency_excluded(full, cfg.profile)
+        if not_eligible:
+            return "skipped", f"not eligible: {not_eligible}"
         min_age = rules.minimum_age(full)
         if min_age and cfg.profile.age is not None and cfg.profile.age < min_age:
             return "skipped", f"requires age {min_age}+"
@@ -168,9 +230,10 @@ def run_once(cfg: Config, dry_run: bool = False) -> dict[str, int]:
     ]
     if cfg.settings.auto_enter_discovered:
         for url, title in tracker.pending_discovered(cfg.settings.max_discovered_per_run):
-            queue.append((Sweepstake(url=url, name=title), "feed"))
+            queue.append((Sweepstake(url=url, name=title, follow_link=True), "feed"))
 
     counts: dict[str, int] = {}
+    results: list[tuple[str, str, str, str]] = []
     if not queue:
         log.info("nothing due")
         return counts
@@ -190,6 +253,8 @@ def run_once(cfg: Config, dry_run: bool = False) -> dict[str, int]:
             status, detail = enter_one(ctx, cfg, sw)
             tracker.record(sw.url, status, detail, sw.name, src)
             counts[status] = counts.get(status, 0) + 1
+            results.append((status, sw.name, sw.url, detail))
             log.info("  %s: %s", status, detail)
         browser.close()
+    notify_run(cfg.notify, results)
     return counts

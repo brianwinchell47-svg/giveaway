@@ -42,6 +42,15 @@ CHECK_RULES = re.compile(
     r"years of age|i am (at least|over)|acknowledge",
     re.I,
 )
+# Forms that are never giveaway entries: blog comments, site search, logins,
+# newsletter sign-ups. Filling these would post your details somewhere unintended.
+UNSAFE_FORM = re.compile(
+    r"comment|search|login|log-in|signin|sign-in|newsletter|subscribe|mc-embedded|mailchimp|"
+    r"contact-form|wpcf7|checkout|cart|password",
+    re.I,
+)
+UNSAFE_FIELD = re.compile(r"^(comment|message|q|s|search|query)$", re.I)
+
 CAPTCHA_FRAME = re.compile(r"recaptcha|hcaptcha|challenges\.cloudflare\.com|arkoselabs|funcaptcha", re.I)
 
 # Annotates every visible field with data-gb-idx and returns a description of each.
@@ -91,6 +100,10 @@ COLLECT_JS = """
       options: el.tagName === 'SELECT'
         ? Array.from(el.options).map(o => [o.value, o.text.trim()]) : null,
       formIdx: form ? Array.from(document.forms).indexOf(form) : -1,
+      formSig: form
+        ? [form.id, form.className, form.getAttribute('action') || '', form.getAttribute('name') || ''].join(' ')
+        : '',
+      formHasPassword: form ? !!form.querySelector('input[type=password]') : false,
     });
   }
   return out;
@@ -136,6 +149,15 @@ def classify(f: dict) -> str | None:
             if rx.search(desc):
                 return key
     return None
+
+
+def is_safe_form(fields: list[dict]) -> bool:
+    if not fields:
+        return False
+    f0 = fields[0]
+    if f0.get("formHasPassword") or UNSAFE_FORM.search(f0.get("formSig", "")):
+        return False
+    return not any(f["tag"] == "textarea" or UNSAFE_FIELD.match(f["name"]) for f in fields)
 
 
 def profile_values(p: Profile, key: str, f: dict) -> list[str]:
@@ -217,6 +239,8 @@ def fill_form(page: Page, profile: Profile, sweep: Sweepstake, settings: Setting
         for f in fields:
             by_form.setdefault(f["formIdx"], []).append(f)
         for idx, ffs in by_form.items():
+            if not is_safe_form(ffs):
+                continue
             score = sum(1 for f in ffs if f["type"] not in ("checkbox", "radio") and classify(f))
             if score > best_score:
                 best_score, frame, best_fields, form_idx = score, fr, ffs, idx

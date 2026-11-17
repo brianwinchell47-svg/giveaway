@@ -6,6 +6,8 @@ import logging
 import time
 
 from .config import ConfigError, load_config
+from .discovery import fetch_feed
+from .notify import NotifyError, send_sms
 from .runner import discover, run_once
 from .tracker import Tracker
 
@@ -25,12 +27,18 @@ def main(argv=None) -> int:
     h.add_argument("-n", type=int, default=30)
     sub.add_parser("manual", help="list giveaways you need to enter by hand")
     sub.add_parser("check", help="validate the config file")
+    sub.add_parser("setup", help="enter your personal details and SMS settings (writes personal.yaml)")
+    sub.add_parser("notify-test", help="send a test text message")
+    sub.add_parser("feeds", help="test each feed and show how many giveaways it lists")
     args = ap.parse_args(argv)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(message)s", datefmt="%H:%M:%S",
     )
+    if args.cmd == "setup":
+        from .setup_wizard import run_setup
+        return run_setup(args.config)
     try:
         cfg = load_config(args.config)
     except (ConfigError, FileNotFoundError) as e:
@@ -42,6 +50,27 @@ def main(argv=None) -> int:
     if args.cmd == "check":
         print(f"OK: {cfg.profile.full_name} <{cfg.profile.email}>, "
               f"{len(cfg.sweepstakes)} giveaway(s), {len(cfg.feeds)} feed(s)")
+    elif args.cmd == "notify-test":
+        if not cfg.notify.enabled:
+            print("notifications are off; run `python -m giveaway_bot setup` to add a provider")
+            return 1
+        try:
+            n = send_sms(cfg.notify, "Giveaway bot test: notifications are working.")
+        except NotifyError as e:
+            print(f"failed: {e}")
+            return 1
+        print(f"sent {n} message(s) via {cfg.notify.provider} to {cfg.notify.to}")
+    elif args.cmd == "feeds":
+        bad = 0
+        for url in cfg.feeds:
+            try:
+                items = fetch_feed(url)
+                print(f"OK   {len(items):3} items  {url}")
+            except Exception as e:  # noqa: BLE001
+                bad += 1
+                print(f"FAIL {type(e).__name__}: {str(e)[:60]}  {url}")
+        if bad:
+            print("remove or replace failing feeds in config.yaml")
     elif args.cmd == "run":
         counts = run_once(cfg, dry_run=args.dry_run)
         if counts:

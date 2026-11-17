@@ -1,19 +1,9 @@
 # Copy to config.yaml and fill in. config.yaml is git-ignored (it holds your personal info).
 
-profile:
-  first_name: Jane
-  last_name: Doe
-  email: jane.doe@example.com
-  phone: "555-555-1234"
-  address1: 123 Main St
-  address2: ""
-  city: Springfield
-  state: IL            # two-letter code
-  state_name: Illinois
-  zip: "62701"
-  country: United States
-  country_code: US
-  birthdate: "1990-04-15"   # YYYY-MM-DD; used for DOB fields and age checks
+# Your personal details and SMS credentials live in a separate private file,
+# personal.yaml (git-ignored). Create it with:  python -m giveaway_bot setup
+# or copy personal.example.yaml. (A `profile:` section here also works.)
+personal_file: personal.yaml
 
 # Giveaways to enter. frequency: once | daily | weekly
 sweepstakes:
@@ -27,10 +17,23 @@ sweepstakes:
     # submit_selector: "button.enter-btn"
     # success_text: ["You're entered"]
 
-# Optional RSS/Atom feeds that list giveaways. New links are recorded, and entered
-# automatically only if settings.auto_enter_discovered is true.
-feeds: []
-#  - https://some-sweepstakes-site.example/feed/
+# RSS/Atom feeds from sweepstakes blogs (mostly US giveaways). New posts are
+# recorded each run; they're entered automatically only when
+# settings.auto_enter_discovered is true. The bot follows each post's "enter here"
+# link to the real entry page, and never fills a blog's comment or newsletter forms.
+# Check which feeds work from your network with:  python -m giveaway_bot feeds
+# For a site with no feed, a service like rss.app can make one from a listing page.
+feeds:
+  - https://www.sweepstakesfanatics.com/feed/
+  - https://sweetiessweeps.com/feed/
+  - https://ilovegiveaways.com/feed/
+  - https://www.sweepstakeslovers.com/feed/
+  - https://www.giveawayfrenzy.com/feed/
+
+# Text-message alerts (credentials go in personal.yaml, or env vars). Which
+# outcomes trigger a text: needs_manual, failed, entered, submitted_unconfirmed.
+notify:
+  on: [needs_manual]
 
 settings:
   headless: true
