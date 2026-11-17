@@ -13,23 +13,12 @@ VALID_FREQUENCIES = {"once", "daily", "weekly"}
 
 @dataclass
 class Profile:
-    first_name: str
-    last_name: str
-    email: str
-    phone: str = ""
-    address1: str = ""
-    address2: str = ""
-    city: str = ""
+    """Only what's needed to check eligibility. Nothing here is sent anywhere."""
     state: str = ""          # two-letter code, e.g. "CA"
     state_name: str = ""     # full name, e.g. "California"
-    zip: str = ""
     country: str = "United States"
     country_code: str = "US"
-    birthdate: str = ""      # YYYY-MM-DD
-
-    @property
-    def full_name(self) -> str:
-        return f"{self.first_name} {self.last_name}".strip()
+    birthdate: str = ""      # YYYY-MM-DD; used only to compare against minimum ages
 
     @property
     def birth(self) -> date | None:
@@ -49,10 +38,6 @@ class Sweepstake:
     url: str
     name: str = ""
     frequency: str = "once"
-    # Extra explicit field values: CSS selector -> value. Overrides heuristics.
-    fields: dict[str, str] = field(default_factory=dict)
-    submit_selector: str = ""
-    success_text: list[str] = field(default_factory=list)
     end_date: str = ""       # YYYY-MM-DD; skipped after this date
     enabled: bool = True
     # Page is a blog post *about* the giveaway: follow its "enter here" link first.
@@ -64,7 +49,7 @@ class Notify:
     provider: str = ""        # twilio | voipms | telnyx | "" (off)
     to: str = ""              # your phone, e.g. +15551234567
     from_number: str = ""     # your Twilio/Telnyx number, or voip.ms DID
-    on: list[str] = field(default_factory=lambda: ["needs_manual"])
+    on: list[str] = field(default_factory=lambda: ["ready"])
     # Credentials. Each can instead come from the env var named in brackets.
     twilio_account_sid: str = ""   # [TWILIO_ACCOUNT_SID]
     twilio_auth_token: str = ""    # [TWILIO_AUTH_TOKEN]
@@ -96,16 +81,10 @@ class Settings:
     headless: bool = True
     data_dir: str = "data"
     page_timeout_ms: int = 30000
-    delay_between_entries_s: float = 20.0
-    # Agree to official rules / terms checkboxes (required to enter).
-    accept_rules: bool = True
-    # Opt in to marketing / newsletter checkboxes. Off by default.
-    accept_marketing: bool = False
-    # Auto-enter giveaways found via feeds (not just list them).
-    auto_enter_discovered: bool = False
+    delay_between_checks_s: float = 3.0
+    # How many newly discovered feed giveaways to check (and include in the text) per run.
     max_discovered_per_run: int = 10
     loop_interval_hours: float = 24.0
-    screenshots: bool = True
 
 
 @dataclass
@@ -127,6 +106,17 @@ class ConfigError(ValueError):
     pass
 
 
+# Keys from older versions (when the bot filled in forms). Ignored if present.
+_OLD_PROFILE_KEYS = {"first_name", "last_name", "email", "phone", "address1", "address2", "city", "zip"}
+_OLD_SWEEP_KEYS = {"fields", "submit_selector", "success_text"}
+_OLD_SETTINGS_KEYS = {"accept_rules", "accept_marketing", "auto_enter_discovered", "screenshots",
+                      "delay_between_entries_s"}
+
+
+def _drop(d: dict, keys: set) -> dict:
+    return {k: v for k, v in d.items() if k not in keys}
+
+
 DEFAULT_PERSONAL_FILE = "personal.yaml"
 
 
@@ -138,7 +128,7 @@ def load_config(path: str | Path) -> Config:
     path = Path(path)
     raw = _read_yaml(path)
 
-    # Personal details + notification credentials live in a separate private file
+    # Eligibility details + notification credentials live in a separate private file
     # (default personal.yaml next to config.yaml; created by `giveaway_bot setup`).
     personal_path = Path(raw.get("personal_file") or DEFAULT_PERSONAL_FILE)
     if not personal_path.is_absolute():
@@ -151,17 +141,11 @@ def load_config(path: str | Path) -> Config:
             pass
 
     prof_raw = {**(raw.get("profile") or {}), **(personal.get("profile") or {})}
-    if not prof_raw:
-        raise ConfigError(
-            f"no profile found; run `python -m giveaway_bot setup` to create {personal_path.name}"
-        )
     try:
-        profile = Profile(**{k: str(v) for k, v in prof_raw.items() if v is not None})
+        profile = Profile(**{k: str(v) for k, v in _drop(prof_raw, _OLD_PROFILE_KEYS).items()
+                             if v is not None})
     except TypeError as e:
         raise ConfigError(f"bad profile field: {e}") from e
-    for req in ("first_name", "last_name", "email"):
-        if not getattr(profile, req):
-            raise ConfigError(f"profile.{req} is required")
     if profile.birthdate:
         try:
             profile.birth
@@ -173,19 +157,17 @@ def load_config(path: str | Path) -> Config:
         if isinstance(s, str):
             s = {"url": s}
         try:
-            sw = Sweepstake(**s)
+            sw = Sweepstake(**_drop(s, _OLD_SWEEP_KEYS))
         except TypeError as e:
             raise ConfigError(f"sweepstakes[{i}]: {e}") from e
         if sw.frequency not in VALID_FREQUENCIES:
             raise ConfigError(
                 f"sweepstakes[{i}].frequency must be one of {sorted(VALID_FREQUENCIES)}"
             )
-        if isinstance(sw.success_text, str):
-            sw.success_text = [sw.success_text]
         sweeps.append(sw)
 
     try:
-        settings = Settings(**(raw.get("settings") or {}))
+        settings = Settings(**_drop(raw.get("settings") or {}, _OLD_SETTINGS_KEYS))
     except TypeError as e:
         raise ConfigError(f"bad settings field: {e}") from e
 
@@ -204,6 +186,11 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError("notify.provider must be one of twilio, voipms, telnyx")
     if isinstance(notify.on, str):
         notify.on = [notify.on]
+    # Older versions used needs_manual for "go enter this yourself".
+    notify.on = list(dict.fromkeys(
+        "ready" if x == "needs_manual" else x for x in notify.on
+        if x in ("ready", "failed", "skipped", "needs_manual")
+    ))
 
     return Config(
         profile=profile,

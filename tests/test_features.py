@@ -5,9 +5,8 @@ import urllib.parse
 import pytest
 import yaml
 
-from giveaway_bot import notify, rules
-from giveaway_bot.config import ConfigError, Notify, Profile, Sweepstake, load_config
-from giveaway_bot.runner import enter_one
+from giveaway_bot import notify
+from giveaway_bot.config import Notify, load_config
 
 
 
@@ -17,22 +16,24 @@ def test_personal_file_merged_and_locked_down(tmp_path):
     (tmp_path / "config.yaml").write_text("sweepstakes: []\nnotify: {on: [needs_manual, failed]}\n")
     personal = tmp_path / "personal.yaml"
     personal.write_text(yaml.safe_dump({
-        "profile": {"first_name": "Jane", "last_name": "Doe", "email": "j@x.com", "zip": 62701},
+        # first_name/email are leftovers from the form-filling version: ignored.
+        "profile": {"first_name": "Jane", "email": "j@x.com", "state": "IL", "birthdate": "1990-04-15"},
         "notify": {"provider": "twilio", "to": "5551234567", "from": "+15550000000",
                    "twilio_account_sid": "AC1", "twilio_auth_token": "tok"},
     }))
     os.chmod(personal, 0o644)
     c = load_config(tmp_path / "config.yaml")
-    assert c.profile.first_name == "Jane" and c.profile.zip == "62701"
+    assert c.profile.state == "IL" and c.profile.age >= 36
+    assert not hasattr(c.profile, "email")
     assert c.notify.provider == "twilio" and c.notify.from_number == "+15550000000"
-    assert c.notify.on == ["needs_manual", "failed"]
+    assert c.notify.on == ["ready", "failed"]  # old status name mapped
     assert os.stat(personal).st_mode & 0o077 == 0
 
 
-def test_missing_profile_points_to_setup(tmp_path):
+def test_profile_is_optional(tmp_path):
     (tmp_path / "config.yaml").write_text("sweepstakes: []\n")
-    with pytest.raises(ConfigError, match="setup"):
-        load_config(tmp_path / "config.yaml")
+    c = load_config(tmp_path / "config.yaml")
+    assert c.profile.age is None and not c.notify.enabled
 
 
 def test_env_var_secret(monkeypatch):
@@ -103,39 +104,13 @@ def test_telnyx_request(captured):
 def test_notify_run_filters_and_formats(captured):
     n = Notify(provider="telnyx", to="5551234567", from_number="5550000000", telnyx_api_key="K")
     notify.notify_run(n, [
-        ("entered", "A", "https://a", "confirmation detected"),
-        ("needs_manual", "Grill", "https://g", "CAPTCHA present (x)"),
+        ("skipped", "Old", "https://old", "page says giveaway has ended"),
+        ("ready", "Grill", "https://g", "open; enter it yourself"),
     ])
     text = json.loads(captured[0].data)["text"]
-    assert "1 need manual entry" in text and "Grill (CAPTCHA) https://g" in text
-    assert "https://a" not in text
+    assert text == "1 giveaway(s) to enter:\n- Grill https://g"
 
 
 def test_notify_failure_does_not_raise(monkeypatch):
     n = Notify(provider="twilio", to="1", from_number="2")  # no credentials
-    notify.notify_run(n, [("needs_manual", "x", "u", "d")])  # logs a warning only
-
-
-# ---------- eligibility ----------
-
-def test_residency():
-    p = Profile("J", "D", "e", state="IL", state_name="Illinois")
-    assert rules.residency_excluded("Open only to legal residents of the U.S. and D.C.", p) is None
-    assert rules.residency_excluded("Open to legal residents of Canada.", p)
-    assert rules.residency_excluded("Open to residents of the 50 US, excluding Illinois.", p)
-    assert rules.residency_excluded("Open to the fifty (50) United States, void in IL.", p)
-    assert rules.residency_excluded("Open worldwide.", p) is None
-
-
-# ---------- blog posts from feeds ----------
-
-def test_feed_blog_post_follows_entry_link(server, ctx, cfg):
-    status, detail = enter_one(ctx, cfg, Sweepstake(url=f"{server}/blog_post.html", follow_link=True))
-    assert status == "entered", detail
-    assert "via http://localhost" in detail
-
-
-def test_never_fills_comment_or_newsletter_forms(server, ctx, cfg):
-    status, detail = enter_one(ctx, cfg, Sweepstake(url=f"{server}/comment_only.html", follow_link=True))
-    assert status == "needs_manual"
-    assert "no entry form" in detail
+    notify.notify_run(n, [("ready", "x", "u", "d")])  # logs a warning only

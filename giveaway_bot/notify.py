@@ -130,36 +130,21 @@ def send_sms(n: Notify, text: str) -> int:
     return len(parts)
 
 
-SHORT_REASON = [
-    (re.compile(r"captcha", re.I), "CAPTCHA"),
-    (re.compile(r"prohibit automated", re.I), "no bots allowed"),
-    (re.compile(r"could not fill", re.I), "extra questions"),
-    (re.compile(r"no entry form", re.I), "no form found"),
-    (re.compile(r"no submit", re.I), "no submit button"),
-    (re.compile(r"login|sign in", re.I), "login needed"),
-]
-
-
-def short_reason(detail: str) -> str:
-    for rx, label in SHORT_REASON:
-        if rx.search(detail):
-            return label
-    return detail[:40]
-
-
 def format_summary(items: list[tuple[str, str, str, str]]) -> str:
-    """items: (status, name, url, detail) -> SMS text."""
-    manual = [i for i in items if i[0] == "needs_manual"]
-    other = [i for i in items if i[0] != "needs_manual"]
+    """items: (status, name, link, detail) -> SMS text."""
+    groups = [
+        ("ready", "giveaway(s) to enter"),
+        ("failed", "couldn't be checked (open them yourself)"),
+        ("skipped", "skipped (ended or not eligible)"),
+    ]
     lines = []
-    if manual:
-        lines.append(f"Giveaway bot: {len(manual)} need manual entry")
-        for _, name, url, detail in manual:
-            lines.append(f"- {(name or '')[:40]} ({short_reason(detail)}) {url}".replace("-  (", "- ("))
-    if other:
-        lines.append(f"Giveaway bot: {len(other)} failed")
-        for status, name, url, detail in other:
-            lines.append(f"- {(name or '')[:40]} {url}")
+    for status, heading in groups:
+        rows = [i for i in items if i[0] == status]
+        if not rows:
+            continue
+        lines.append(f"{len(rows)} {heading}:")
+        for _, name, link, _detail in rows:
+            lines.append(f"- {name[:50]} {link}" if name else f"- {link}")
     return "\n".join(lines)
 
 

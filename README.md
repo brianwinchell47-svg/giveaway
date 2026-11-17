@@ -1,46 +1,57 @@
-# Giveaway Automation
+# Giveaway Finder
 
-A bot that enters sweepstakes and giveaways for you on a schedule. It opens each giveaway in a headless browser, fills the entry form with your details, ticks the "I agree to the Official Rules" box, submits, and confirms the entry. It also keeps a log so it never enters the same giveaway twice in one period.
+Finds sweepstakes and giveaways, checks which ones are still open and that you're eligible for, and **texts you the links so you can enter them yourself**.
+
+It only reads web pages. It never fills in, clicks or submits any form, so every entry you make is your own.
 
 ## What it does on each run
 
-1. **Discovers** new giveaways from any RSS/Atom feeds you list (optional).
-2. **Picks what's due**: `once` giveaways not yet attempted, `daily`/`weekly` ones whose period has elapsed, and anything past its `end_date` is skipped.
-3. For each giveaway:
-   - Skips it if the page says it has **ended**, or you've **already entered** today.
-   - Reads the page **and its linked Official Rules**. If they ban automated/scripted entries, it does **not** enter and flags it for you instead (automated entries there would just get you disqualified).
-   - Skips it if the rules' minimum age is above yours, or the residency rules exclude you.
-   - If there's a **CAPTCHA**, it flags it for manual entry (it does not try to solve or bypass them).
-   - Otherwise it finds the entry form, maps fields (name, email, phone, address, state, ZIP, country, birth date/month/day/year, age) using labels, `name`/`id`, placeholders and `autocomplete`. It fills them, ticks the rules checkbox, leaves newsletter/partner opt-ins **unticked** (configurable), and submits.
-   - Checks for a confirmation message and saves a screenshot.
-4. Logs every attempt to `data/entries.db`.
-5. Texts you a list of anything that needs manual entry (optional).
+1. **Discovers** new giveaways from the RSS/Atom feeds in your config (sweepstakes blogs).
+2. **Picks what's due**: new feed posts, plus giveaways from your own list. `daily`/`weekly` giveaways come back once per period; `once` giveaways are sent once.
+3. **Checks each page** (read-only), including its linked Official Rules:
+   - skips it if the page says it has **ended**, or it's past your `end_date`,
+   - skips it if the rules are only open to residents of somewhere else, exclude your state, or set a minimum age above yours,
+   - for blog posts, finds the "click here to enter" link and sends you the **sponsor's entry page** instead of the article.
+4. **Texts you** one message listing the giveaways that are ready, with links.
+5. Logs everything to `data/entries.db`.
 
-Statuses: `entered`, `submitted_unconfirmed` (submitted, but no "thanks" text found; check the screenshot), `needs_manual`, `skipped`, `failed`.
+Statuses: `ready` (open, and you look eligible), `skipped` (ended or not eligible), `failed` (page couldn't be loaded; retried next run).
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
 playwright install chromium
-python -m giveaway_bot setup         # asks for your details + SMS settings
+cp config.example.yaml config.yaml   # your giveaway list + feeds
+python -m giveaway_bot setup         # eligibility details + SMS settings
 python -m giveaway_bot check         # validate config
-python -m giveaway_bot feeds         # see which giveaway feeds work for you
-python -m giveaway_bot run --dry-run # see what would be entered
-python -m giveaway_bot run           # enter everything that's due
+python -m giveaway_bot feeds         # see which feeds work for you
+python -m giveaway_bot run           # check everything due, text you the links
 ```
 
 ## Your personal information
 
-Your name, email, address, birth date and SMS credentials go in **`personal.yaml`**, separate from `config.yaml`, so you can share or commit your giveaway list without exposing your details.
+`personal.yaml` holds only what's needed to filter out giveaways you can't win, plus your SMS credentials:
 
-- `python -m giveaway_bot setup` asks for everything and writes the file (re-run any time; Enter keeps the current value). Or copy `personal.example.yaml` and edit it.
-- The file is git-ignored and set to owner-only permissions (`chmod 600`).
-- SMS credentials can come from environment variables instead (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `VOIPMS_USERNAME`, `VOIPMS_API_PASSWORD`, `TELNYX_API_KEY`).
+- **state** and **country**, for residency rules,
+- **birth date** (optional), for minimum-age rules.
+
+None of it is typed into any website. The file is git-ignored and set to owner-only permissions (`chmod 600`). Create it with `python -m giveaway_bot setup`, or copy `personal.example.yaml`. If you have a `personal.yaml` from the earlier form-filling version, re-run `setup`. It drops the name, email, phone and address it no longer needs.
+
+SMS credentials can come from environment variables instead (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `VOIPMS_USERNAME`, `VOIPMS_API_PASSWORD`, `TELNYX_API_KEY`).
 
 ## Text alerts to your phone
 
-After each run the bot sends **one batched text** listing giveaways that need you (CAPTCHA, rules ban bots, extra questions), with links so you can tap and enter. Choose which outcomes alert you with `notify.on` in `config.yaml` (`needs_manual`, `failed`, `entered`, `submitted_unconfirmed`).
+After each run you get **one batched text**, for example:
+
+```
+3 giveaway(s) to enter:
+- Win a Grill from Acme https://acme.example/sweeps
+- $500 Gift Card Daily https://brand.example/win
+- Kitchen Makeover https://sponsor.example/enter
+```
+
+Choose what's included with `notify.on` in `config.yaml`: `ready` (default), `failed`, `skipped`.
 
 | Provider | What you need | Notes |
 |---|---|---|
@@ -52,60 +63,35 @@ Test it with `python -m giveaway_bot notify-test`. A failed text never stops the
 
 ## Giveaway feeds
 
-`config.example.yaml` comes with five sweepstakes-blog RSS feeds. Run `python -m giveaway_bot feeds` to see which ones work from your connection, and remove any that fail. Feed posts are usually *articles about* a giveaway, so for those the bot:
+`config.example.yaml` comes with five sweepstakes-blog RSS feeds. Run `python -m giveaway_bot feeds` to see which ones work from your connection, and remove any that fail. To keep texts short, each run checks up to `max_discovered_per_run` new feed posts (default 10). The rest wait for later runs.
 
-- follows the post's "click here to enter" link to the sponsor's real entry page, and
-- **never** fills comment, search, login, newsletter or contact forms, even on the entry page itself.
+## Running it on a schedule
 
-It also skips giveaways whose rules say they're open only to residents of somewhere else, or that exclude your state.
-
-## Running it without you
-
-Either leave it running:
-
-```bash
-python -m giveaway_bot loop          # runs every settings.loop_interval_hours
-```
-
-or schedule it with cron (recommended; survives reboots). Run `crontab -e` and add:
+Cron (Linux/macOS). Run `crontab -e` and add:
 
 ```cron
-# every day at 9:17am
-17 9 * * * cd /path/to/giveaway && /usr/bin/python3 -m giveaway_bot run >> data/cron.log 2>&1
+# every day at 8:17am
+17 8 * * * cd /path/to/giveaway && /usr/bin/python3 -m giveaway_bot run >> data/cron.log 2>&1
 ```
 
-On Windows, use Task Scheduler with the action `python -m giveaway_bot run` and "Start in" set to this folder.
+On Windows, use Task Scheduler with the action `python -m giveaway_bot run` and "Start in" set to this folder. Or leave `python -m giveaway_bot loop` running.
 
-## Other commands
+## Commands
 
 | Command | Purpose |
 |---|---|
-| `python -m giveaway_bot manual` | Giveaways it couldn't enter (CAPTCHA, rules ban automation, unknown required fields) with the reason. Enter these yourself. |
-| `python -m giveaway_bot history -n 50` | Recent attempts and outcomes |
+| `python -m giveaway_bot run` | Discover, check, and text you what's ready (`--dry-run` to preview) |
+| `python -m giveaway_bot todo` | Giveaways marked ready in the last 24 hours, with links |
+| `python -m giveaway_bot history -n 50` | Recent checks and results |
 | `python -m giveaway_bot discover` | Fetch feeds only |
 | `python -m giveaway_bot feeds` | Test each feed and show how many items it lists |
-| `python -m giveaway_bot setup` | Enter or update your details and SMS settings |
+| `python -m giveaway_bot setup` | Enter or update eligibility details and SMS settings |
 | `python -m giveaway_bot notify-test` | Send a test text |
-| `python -m giveaway_bot run --show-browser` | Watch it work in a visible browser (good for debugging a site) |
+| `python -m giveaway_bot loop` | Run forever, every `loop_interval_hours` |
 
-## Fixing a site the auto-detection gets wrong
+## Notes
 
-Add overrides to that giveaway in `config.yaml`:
-
-```yaml
-  - url: https://example.com/sweeps
-    frequency: daily
-    fields:
-      "#promo-code": "WINTER"        # CSS selector: value
-    submit_selector: "button.enter-btn"
-    success_text: ["You're entered"]
-```
-
-## Notes and limits
-
-- **Discovered giveaways aren't entered unless you opt in** (`auto_enter_discovered: true`). Feeds often include giveaways for other countries or ones that require social follows. Start by reviewing them with `discover`.
-- It can't do entries that need a login, a social-media action (follow/retweet), a photo/essay upload, or a CAPTCHA. Those land in `manual`.
-- One identity only: it uses the single profile in your config. Extra emails/identities break nearly every sweepstakes' rules and void all of your entries.
+- Eligibility checks read the rules' wording and can miss unusual phrasing. Always skim the Official Rules before you enter.
 - `config.yaml` and `personal.yaml` are both git-ignored.
 - Set `GIVEAWAY_CHROMIUM=/path/to/chrome` to use a specific Chromium binary.
 
@@ -115,3 +101,5 @@ Add overrides to that giveaway in `config.yaml`:
 pip install pytest
 python -m pytest -q    # uses local test pages in tests/fixtures; no internet needed
 ```
+
+The tests include a guard that fails if any form-interaction call (`fill`, `click`, `check`, `select_option`, …) appears in the code. A second test checks that a page's form is never submitted.

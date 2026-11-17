@@ -1,22 +1,16 @@
 # Copy to personal.yaml (or run `python -m giveaway_bot setup`). Keep it private:
 # it's git-ignored and the bot restricts it to owner-only permissions.
 
+# Used only to skip giveaways you can't win (residency / minimum age).
+# All optional. Nothing here is ever typed into a website.
 profile:
-  first_name: Jane
-  last_name: Doe
-  email: jane.doe@example.com
-  phone: "555-555-1234"
-  address1: 123 Main St
-  address2: ""
-  city: Springfield
   state: IL                 # two-letter code
   state_name: Illinois
-  zip: "62701"
   country: United States
   country_code: US
   birthdate: "1990-04-15"   # YYYY-MM-DD
 
-# Text alerts to your phone. Pick ONE provider and fill its credentials.
+# Text alerts with giveaway links, sent to your phone. Pick ONE provider and fill its credentials.
 # Credentials can instead be set as env vars (TWILIO_AUTH_TOKEN, VOIPMS_API_PASSWORD, ...).
 notify:
   provider: twilio          # twilio | voipms | telnyx

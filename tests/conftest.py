@@ -12,10 +12,26 @@ from giveaway_bot.runner import launch_browser
 FIX = Path(__file__).parent / "fixtures"
 
 
+REQUESTS: list[str] = []  # every path the test server was asked for
+
+
+class _Handler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        REQUESTS.append(self.path)
+        super().do_GET()
+
+    def do_POST(self):
+        REQUESTS.append("POST " + self.path)
+        self.send_response(200)
+        self.end_headers()
+
+
 @pytest.fixture(scope="module")
 def server():
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(FIX))
-    handler.log_message = lambda *a: None
+    handler = functools.partial(_Handler, directory=str(FIX))
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{srv.server_address[1]}"
@@ -32,6 +48,5 @@ def ctx():
 
 @pytest.fixture
 def cfg(tmp_path):
-    p = Profile(first_name="Jane", last_name="Doe", email="jane@example.com", state="IL",
-                state_name="Illinois", zip="62701", birthdate="1990-04-15")
-    return Config(p, [], [], Settings(data_dir=str(tmp_path), screenshots=False))
+    p = Profile(state="IL", state_name="Illinois", birthdate="1990-04-15")
+    return Config(p, [], [], Settings(data_dir=str(tmp_path)))

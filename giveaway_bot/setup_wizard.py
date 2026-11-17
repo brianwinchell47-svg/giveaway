@@ -1,4 +1,4 @@
-"""Interactive `setup`: writes your details and SMS credentials to personal.yaml."""
+"""Interactive `setup`: writes eligibility details and SMS credentials to personal.yaml."""
 from __future__ import annotations
 
 import getpass
@@ -9,20 +9,13 @@ from pathlib import Path
 
 import yaml
 
+# Only what's needed to skip giveaways you can't win (age / residency limits).
 PROFILE_FIELDS = [
-    ("first_name", "First name", True),
-    ("last_name", "Last name", True),
-    ("email", "Email", True),
-    ("phone", "Phone", False),
-    ("address1", "Street address", False),
-    ("address2", "Apt / suite (optional)", False),
-    ("city", "City", False),
     ("state", "State, 2-letter code (e.g. IL)", False),
     ("state_name", "State, full name (e.g. Illinois)", False),
-    ("zip", "ZIP code", False),
     ("country", "Country", False),
     ("country_code", "Country code (e.g. US)", False),
-    ("birthdate", "Birth date YYYY-MM-DD", False),
+    ("birthdate", "Birth date YYYY-MM-DD (for age limits; optional)", False),
 ]
 
 PROVIDER_SECRETS = {
@@ -67,10 +60,13 @@ def run_setup(config_path: str) -> int:
         personal_path = cfg_path.parent / personal_path
     existing = yaml.safe_load(personal_path.read_text()) if personal_path.exists() else {}
     existing = existing or {}
-    prof = dict(existing.get("profile") or {})
+    from .config import _OLD_PROFILE_KEYS
+    # Drop details older versions collected for form filling; they're no longer used.
+    prof = {k: v for k, v in (existing.get("profile") or {}).items() if k not in _OLD_PROFILE_KEYS}
     notify = dict(existing.get("notify") or {})
 
-    print(f"\nYour details (saved only to {personal_path}, never committed). Enter keeps [current].\n")
+    print(f"\nEligibility details (saved only to {personal_path}, never committed). "
+          "Enter keeps [current].\n")
     prof.setdefault("country", "United States")
     prof.setdefault("country_code", "US")
     for key, label, req in PROFILE_FIELDS:
@@ -82,7 +78,7 @@ def run_setup(config_path: str) -> int:
             break
         prof[key] = v
 
-    print("\nText-message alerts for giveaways that need you (CAPTCHA, etc.)")
+    print("\nText-message alerts with links to giveaways you can enter")
     provider = _ask("Provider: twilio, voipms, telnyx, or none", notify.get("provider", "none")).lower()
     if provider in PROVIDER_SECRETS:
         notify["provider"] = provider
@@ -92,7 +88,7 @@ def run_setup(config_path: str) -> int:
         notify["from"] = _ask(label, notify.get("from", ""), True)
         for key, lab, secret in PROVIDER_SECRETS[provider]:
             notify[key] = _ask(lab, notify.get(key, ""), True, secret)
-        notify.setdefault("on", ["needs_manual"])
+        notify["on"] = [x for x in notify.get("on", []) if x in ("ready", "failed", "skipped")] or ["ready"]
     else:
         notify = {}
 

@@ -13,21 +13,21 @@ from .tracker import Tracker
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="giveaway_bot", description="Autonomously enter sweepstakes.")
+    ap = argparse.ArgumentParser(prog="giveaway_bot", description="Find sweepstakes you can enter and text you the links.")
     ap.add_argument("-c", "--config", default="config.yaml")
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run", help="discover + enter everything due, once")
-    r.add_argument("--dry-run", action="store_true", help="show what would be entered")
+    r = sub.add_parser("run", help="discover + check everything due, text you the links")
+    r.add_argument("--dry-run", action="store_true", help="show what would be checked")
     r.add_argument("--show-browser", action="store_true", help="run with a visible browser")
     lp = sub.add_parser("loop", help="run forever, every settings.loop_interval_hours")
     lp.add_argument("--show-browser", action="store_true")
     sub.add_parser("discover", help="only fetch feeds and list new giveaways")
-    h = sub.add_parser("history", help="show recent entry attempts")
+    h = sub.add_parser("history", help="show recently checked giveaways")
     h.add_argument("-n", type=int, default=30)
-    sub.add_parser("manual", help="list giveaways you need to enter by hand")
+    sub.add_parser("todo", help="list giveaways ready for you to enter (last 24h)")
     sub.add_parser("check", help="validate the config file")
-    sub.add_parser("setup", help="enter your personal details and SMS settings (writes personal.yaml)")
+    sub.add_parser("setup", help="enter eligibility details and SMS settings (writes personal.yaml)")
     sub.add_parser("notify-test", help="send a test text message")
     sub.add_parser("feeds", help="test each feed and show how many giveaways it lists")
     args = ap.parse_args(argv)
@@ -48,8 +48,11 @@ def main(argv=None) -> int:
         cfg.settings.headless = False
 
     if args.cmd == "check":
-        print(f"OK: {cfg.profile.full_name} <{cfg.profile.email}>, "
-              f"{len(cfg.sweepstakes)} giveaway(s), {len(cfg.feeds)} feed(s)")
+        p = cfg.profile
+        where = ", ".join(x for x in (p.state, p.country) if x) or "location not set"
+        print(f"OK: {where}; age {p.age if p.age is not None else 'not set'}; "
+              f"{len(cfg.sweepstakes)} giveaway(s), {len(cfg.feeds)} feed(s); "
+              f"texts {'via ' + cfg.notify.provider if cfg.notify.enabled else 'off'}")
     elif args.cmd == "notify-test":
         if not cfg.notify.enabled:
             print("notifications are off; run `python -m giveaway_bot setup` to add a provider")
@@ -75,8 +78,8 @@ def main(argv=None) -> int:
         counts = run_once(cfg, dry_run=args.dry_run)
         if counts:
             print("summary: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
-        if counts.get("needs_manual"):
-            print("run `python -m giveaway_bot manual` to see what needs you.")
+        if counts.get("ready"):
+            print("run `python -m giveaway_bot todo` for the links.")
     elif args.cmd == "loop":
         while True:
             try:
@@ -91,10 +94,10 @@ def main(argv=None) -> int:
     elif args.cmd == "history":
         for ts, status, name, url, detail in Tracker(cfg.data_path / "entries.db").history(args.n):
             print(f"{ts}  {status:22} {(name or '')[:30]:30} {url}\n{'':43}{detail}")
-    elif args.cmd == "manual":
-        rows = Tracker(cfg.data_path / "entries.db").needs_manual()
+    elif args.cmd == "todo":
+        rows = Tracker(cfg.data_path / "entries.db").todo()
         if not rows:
-            print("nothing needs manual entry")
-        for url, name, detail, ts in rows:
-            print(f"- {name or url}\n  {url}\n  why: {detail}")
+            print("nothing to enter right now")
+        for link, name, ts in rows:
+            print(f"- {name or ''}\n  {link}")
     return 0

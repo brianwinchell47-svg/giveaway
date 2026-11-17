@@ -1,27 +1,24 @@
-# Copy to config.yaml and fill in. config.yaml is git-ignored (it holds your personal info).
+# Copy to config.yaml (git-ignored) and edit.
+#
+# The bot only READS giveaway pages. It never fills in or submits anything:
+# it finds giveaways, checks they're still open and that you're eligible,
+# and texts you the links so you can enter them yourself.
 
-# Your personal details and SMS credentials live in a separate private file,
-# personal.yaml (git-ignored). Create it with:  python -m giveaway_bot setup
-# or copy personal.example.yaml. (A `profile:` section here also works.)
+# Your state/country/birth date (for eligibility) and SMS credentials live in a
+# separate private file. Create it with:  python -m giveaway_bot setup
 personal_file: personal.yaml
 
-# Giveaways to enter. frequency: once | daily | weekly
+# Giveaways you want reminders for. frequency: once | daily | weekly
+#   daily = you get the link once a day (for daily-entry sweepstakes)
 sweepstakes:
   - name: Example daily sweepstakes
     url: https://example.com/sweeps
     frequency: daily
-    end_date: "2026-12-31"     # optional; skipped after this date
-    # Optional overrides when the auto-detection gets a site wrong:
-    # fields:
-    #   "#promo-code": "WINTER"
-    # submit_selector: "button.enter-btn"
-    # success_text: ["You're entered"]
+    end_date: "2026-12-31"     # optional; no more reminders after this date
 
-# RSS/Atom feeds from sweepstakes blogs (mostly US giveaways). New posts are
-# recorded each run; they're entered automatically only when
-# settings.auto_enter_discovered is true. The bot follows each post's "enter here"
-# link to the real entry page, and never fills a blog's comment or newsletter forms.
-# Check which feeds work from your network with:  python -m giveaway_bot feeds
+# RSS/Atom feeds from sweepstakes blogs (mostly US giveaways). Each new post is
+# checked once; for blog posts the bot finds the sponsor's real entry page and
+# sends you that link. Check which feeds work for you:  python -m giveaway_bot feeds
 # For a site with no feed, a service like rss.app can make one from a listing page.
 feeds:
   - https://www.sweepstakesfanatics.com/feed/
@@ -30,18 +27,14 @@ feeds:
   - https://www.sweepstakeslovers.com/feed/
   - https://www.giveawayfrenzy.com/feed/
 
-# Text-message alerts (credentials go in personal.yaml, or env vars). Which
-# outcomes trigger a text: needs_manual, failed, entered, submitted_unconfirmed.
+# Which results to text you: ready (open + eligible), failed (couldn't load),
+# skipped (ended / not eligible). Credentials go in personal.yaml.
 notify:
-  on: [needs_manual]
+  on: [ready]
 
 settings:
   headless: true
   data_dir: data
-  delay_between_entries_s: 20
-  accept_rules: true            # tick "I agree to the Official Rules" boxes
-  accept_marketing: false       # tick newsletter / partner-offer boxes
-  auto_enter_discovered: false
-  max_discovered_per_run: 10
+  delay_between_checks_s: 3
+  max_discovered_per_run: 10    # new feed giveaways checked (and texted) per run
   loop_interval_hours: 24
-  screenshots: true             # saved to data/screenshots after each submit

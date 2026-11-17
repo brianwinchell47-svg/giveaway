@@ -1,4 +1,4 @@
-"""SQLite log of entry attempts, used to enforce one entry per period."""
+"""SQLite log of checked giveaways, so each one is sent to you once per period."""
 from __future__ import annotations
 
 import sqlite3
@@ -10,10 +10,11 @@ CREATE TABLE IF NOT EXISTS attempts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     url TEXT NOT NULL,
     name TEXT,
-    status TEXT NOT NULL,   -- entered | submitted_unconfirmed | skipped | needs_manual | failed
+    status TEXT NOT NULL,   -- ready | skipped | failed
     detail TEXT,
     source TEXT,            -- config | feed
-    ts TEXT NOT NULL
+    ts TEXT NOT NULL,
+    link TEXT               -- page to open to enter (entry page behind a blog post)
 );
 CREATE INDEX IF NOT EXISTS attempts_url ON attempts(url, ts);
 CREATE TABLE IF NOT EXISTS discovered (
@@ -24,10 +25,8 @@ CREATE TABLE IF NOT EXISTS discovered (
 );
 """
 
-# Statuses that count as "we entered this period" (don't enter again).
-ENTERED = ("entered", "submitted_unconfirmed")
-# Statuses that mean "don't keep retrying automatically" for one-time giveaways.
-FINAL = ENTERED + ("needs_manual", "skipped")
+# Statuses that mean "handled for this period" (a failed check is retried next run).
+DONE = ("ready", "skipped")
 
 PERIODS = {"daily": timedelta(hours=23), "weekly": timedelta(days=6, hours=23)}
 
@@ -36,11 +35,15 @@ class Tracker:
     def __init__(self, path: str | Path):
         self.db = sqlite3.connect(str(path))
         self.db.executescript(SCHEMA)
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(attempts)")}
+        if "link" not in cols:  # database from an older version
+            self.db.execute("ALTER TABLE attempts ADD COLUMN link TEXT")
 
-    def record(self, url, status, detail="", name="", source="config"):
+    def record(self, url, status, detail="", name="", source="config", link=None):
         self.db.execute(
-            "INSERT INTO attempts(url,name,status,detail,source,ts) VALUES (?,?,?,?,?,?)",
-            (url, name, status, detail, source, datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO attempts(url,name,status,detail,source,ts,link) VALUES (?,?,?,?,?,?,?)",
+            (url, name, status, detail, source, datetime.now().isoformat(timespec="seconds"),
+             link or url),
         )
         self.db.commit()
 
@@ -53,12 +56,9 @@ class Tracker:
 
     def is_due(self, url: str, frequency: str, now: datetime | None = None) -> bool:
         now = now or datetime.now()
+        last = self.last(url, DONE)
         if frequency == "once":
-            return self.last(url, FINAL) is None
-        last = self.last(url, ENTERED)
-        if last is None:
-            # Recurring giveaway flagged as manual/skipped today: wait for next period.
-            last = self.last(url, ("needs_manual", "skipped"))
+            return last is None
         return last is None or now - last >= PERIODS[frequency]
 
     def add_discovered(self, url, title, feed) -> bool:
@@ -82,9 +82,11 @@ class Tracker:
             (limit,),
         ).fetchall()
 
-    def needs_manual(self):
+    def todo(self, hours: float = 24):
+        """Giveaways sent to you as ready to enter in the last `hours`."""
+        since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
         return self.db.execute(
-            "SELECT url, name, detail, MAX(ts) FROM attempts WHERE status='needs_manual' "
-            "AND url NOT IN (SELECT url FROM attempts WHERE status IN ('entered','submitted_unconfirmed')) "
-            "GROUP BY url ORDER BY MAX(ts) DESC"
+            "SELECT COALESCE(link, url), name, MAX(ts) FROM attempts "
+            "WHERE status='ready' AND ts >= ? GROUP BY url ORDER BY MAX(ts) DESC",
+            (since,),
         ).fetchall()
